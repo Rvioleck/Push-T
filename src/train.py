@@ -10,12 +10,10 @@ from tqdm.auto import tqdm
 
 from pushTImageDataset import get_dataloader
 from conditionalUnet import ConditionalUnet1D, get_resnet, replace_bn_with_gn
-from accelerate import Accelerator
+from accelerate import Accelerator, accelerator
 
 
-def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, num_epochs, save_directory):
-    accelerator = Accelerator(gradient_accumulation_steps=2,
-                              mixed_precision="fp16")
+def train_loop(accelerator, nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, num_epochs, save_directory):
     device = accelerator.device
 
     nets, optimizer, dataloader, lr_scheduler = accelerator.prepare(
@@ -25,13 +23,16 @@ def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, 
     vision_encoder = nets['vision_encoder']
     noise_pred_net = nets['noise_pred_net']
 
-    with tqdm(range(num_epochs), desc='Epoch') as tglobal:
+    vision_encoder = accelerator.prepare_model(vision_encoder)
+    noise_pred_net = accelerator.prepare_model(noise_pred_net)
+
+    with tqdm(range(num_epochs), desc='Epoch', disable=not accelerator.is_local_main_process) as tglobal:
         for epoch_idx in tglobal:
             epoch_loss = []
-            with tqdm(dataloader, desc='Batch', leave=False) as tepoch:
+            with tqdm(dataloader, desc='Batch', leave=False, disable=not accelerator.is_local_main_process) as tepoch:
                 for nbatch in tepoch:
-                    nimage = nbatch['image'][:, :obs_horizon].to(device)
-                    nagent_pos = nbatch['agent_pos'][:, :obs_horizon].to(device)
+                    nimage = nbatch['image'][:, :].to(device)
+                    nagent_pos = nbatch['agent_pos'][:, :].to(device)
                     naction = nbatch['action'].to(device)
                     B = nagent_pos.shape[0]
 
@@ -85,6 +86,7 @@ def get_nets(obs_horizon=2):
     return nets, ema
 
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Training script for the model.")
     parser.add_argument("--num_epochs", type=int, default=200, help="Number of epochs to train the model.")
@@ -93,28 +95,35 @@ if __name__ == "__main__":
     parser.add_argument("--diffusion_iters", type=int, default=100, help="Iteration of one diffusion step.")
     parser.add_argument("--save_dir", type=str, default="../ckpts/", help="Directory of saving model.")
     parser.add_argument("--dataset_dir", type=str, default="../pusht_cchi_v7_replay.zarr.zip", help="Path of dataset.")
-
     args = parser.parse_args()
-    pred_horizon = 16
-    obs_horizon = 2
-    action_horizon = 8
+    accelerator = Accelerator(gradient_accumulation_steps=2,
+                              mixed_precision="fp16")
 
-    nets, ema = get_nets(obs_horizon=obs_horizon)
+    @accelerator.on_local_main_process
+    def prepare_data(args):
+        pred_horizon = 16
+        obs_horizon = 2
+        action_horizon = 8
 
-    dataloader = get_dataloader(dataset_path=args.dataset_dir, pred_horizon=pred_horizon, obs_horizon=obs_horizon,
-                                action_horizon=action_horizon,
-                                batch_size=args.batch_size)
+        nets, ema = get_nets(obs_horizon=obs_horizon)
 
-    optimizer = torch.optim.AdamW(params=nets.parameters(), lr=args.lr, weight_decay=1e-6)
+        dataloader = get_dataloader(dataset_path=args.dataset_dir, pred_horizon=pred_horizon, obs_horizon=obs_horizon,
+                                    action_horizon=action_horizon,
+                                    batch_size=args.batch_size)
 
-    lr_scheduler = get_scheduler(name='cosine', optimizer=optimizer, num_warmup_steps=500,
-                                 num_training_steps=len(dataloader) * args.num_epochs)
+        optimizer = torch.optim.AdamW(params=nets.parameters(), lr=args.lr, weight_decay=1e-6)
 
-    noise_scheduler = DDPMScheduler(num_train_timesteps=args.diffusion_iters, beta_schedule='squaredcos_cap_v2',
-                                    clip_sample=True,
-                                    prediction_type='epsilon')
-    save_dir = args.save_dir
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
+        lr_scheduler = get_scheduler(name='cosine', optimizer=optimizer, num_warmup_steps=500,
+                                     num_training_steps=len(dataloader) * args.num_epochs)
 
-    train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, args.num_epochs, save_dir)
+        noise_scheduler = DDPMScheduler(num_train_timesteps=args.diffusion_iters, beta_schedule='squaredcos_cap_v2',
+                                        clip_sample=True,
+                                        prediction_type='epsilon')
+        save_dir = args.save_dir
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        return nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler
+
+    nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler = prepare_data(args)
+    train_loop(accelerator, nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, args.num_epochs,
+               args.save_dir)
