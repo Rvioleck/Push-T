@@ -27,6 +27,7 @@ def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, 
     )
 
     vision_encoder = accelerator.prepare_model(vision_encoder)
+    ema.to(device)
 
     with tqdm(range(num_epochs), desc='Epoch', disable=not accelerator.is_local_main_process) as tglobal:
         for epoch_idx in tglobal:
@@ -66,11 +67,11 @@ def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, 
 
             tglobal.set_postfix(loss=np.mean(epoch_loss))
             if (epoch_idx + 1) % 10 == 0:
-                save_directory = os.path.join(save_directory, time.strftime("%Y%m%d-%H%M%S") + "-" + str(epoch_idx))
-                ema["noise_pred_net"].copy_to(noise_pred_net.parameters())
+                exact_directory = os.path.join(save_directory, time.strftime("%Y%m%d-%H%M%S") + "-" + str(epoch_idx))
+                ema.copy_to(nets.parameters())
                 accelerator.wait_for_everyone()
-                accelerator.save_state(save_directory)
-                print(f"Saved model to {save_directory}, loss: {np.mean(epoch_loss)}")
+                accelerator.save_state(exact_directory)
+                print(f"Saved model to {exact_directory}, loss: {np.mean(epoch_loss)}")
 
 
 def get_nets(obs_horizon=2):
@@ -98,7 +99,7 @@ def prepare_data(args):
 
     dataloader = get_dataloader(dataset_path=args.dataset_dir, pred_horizon=pred_horizon, obs_horizon=obs_horizon,
                                 action_horizon=action_horizon,
-                                batch_size=args.batch_size)
+                                batch_size=args.batch_size, small_dataset=True)
 
     optimizer = torch.optim.AdamW(params=nets.parameters(), lr=args.lr, weight_decay=1e-6)
 
