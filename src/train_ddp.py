@@ -4,31 +4,35 @@ import time
 
 import numpy as np
 import torch
-from accelerate import Accelerator
 from diffusers import EMAModel, get_scheduler, DDPMScheduler
 from torch import nn
 from tqdm.auto import tqdm
 
 from pushTImageDataset import get_dataloader
 from conditionalUnet import ConditionalUnet1D, get_resnet, replace_bn_with_gn
+from accelerate import Accelerator
 
 
 def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, num_epochs,
                save_directory):
-    accelerator = Accelerator(mixed_precision='fp16', gradient_accumulation_steps=2)
+    accelerator = Accelerator(gradient_accumulation_steps=2,
+                              mixed_precision="fp16")
     device = accelerator.device
 
     vision_encoder = nets['vision_encoder']
     noise_pred_net = nets['noise_pred_net']
 
-    noise_pred_net, optimizer, dataloader, lr_scheduler = accelerator.prepare(noise_pred_net, optimizer, dataloader,
-                                                                              lr_scheduler)
+
+    noise_pred_net, optimizer, dataloader, lr_scheduler = accelerator.prepare(
+        noise_pred_net, optimizer, dataloader, lr_scheduler
+    )
+
     vision_encoder = accelerator.prepare_model(vision_encoder)
 
-    with tqdm(range(num_epochs), desc='Epoch') as tglobal:
+    with tqdm(range(num_epochs), desc='Epoch', disable=not accelerator.is_local_main_process) as tglobal:
         for epoch_idx in tglobal:
             epoch_loss = []
-            with tqdm(dataloader, desc='Batch', leave=False) as tepoch:
+            with tqdm(dataloader, desc='Batch', leave=False, disable=not accelerator.is_local_main_process) as tepoch:
                 for nbatch in tepoch:
                     nimage = nbatch['image'][:, :].to(device)
                     nagent_pos = nbatch['agent_pos'][:, :].to(device)

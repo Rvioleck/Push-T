@@ -8,7 +8,7 @@ from tqdm.auto import tqdm
 
 from pushTEnv import PushTImageEnv
 from pushTImageDataset import normalize_data, get_stats, unnormalize_data
-from train import get_nets
+from train_ddp import get_nets
 
 num_diffusion_iters = 100
 noise_scheduler = DDPMScheduler(
