@@ -149,7 +149,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
         return nsample
 
 
-def get_stats(dataset_path=r"E:\MyNotes\AI_learning\My Notes\DiffusionPolicy\PushT\pusht_cchi_v7_replay.zarr.zip",
+def get_stats(dataset_path=r"./pusht_cchi_v7_replay.zarr.zip",
               pred_horizon=16,
               obs_horizon=2,
               action_horizon=8):
@@ -162,7 +162,7 @@ def get_stats(dataset_path=r"E:\MyNotes\AI_learning\My Notes\DiffusionPolicy\Pus
     return dataset.stats
 
 
-def get_dataloader(dataset_path=r"E:\MyNotes\AI_learning\My Notes\DiffusionPolicy\PushT\pusht_cchi_v7_replay.zarr.zip",
+def get_dataloader(dataset_path=r"./pusht_cchi_v7_replay.zarr.zip",
                    pred_horizon=16,
                    obs_horizon=2,
                    action_horizon=8,
