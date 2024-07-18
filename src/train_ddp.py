@@ -22,7 +22,6 @@ def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, 
     vision_encoder = nets['vision_encoder']
     noise_pred_net = nets['noise_pred_net']
 
-
     noise_pred_net, optimizer, dataloader, lr_scheduler = accelerator.prepare(
         noise_pred_net, optimizer, dataloader, lr_scheduler
     )
@@ -59,15 +58,16 @@ def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, 
                     optimizer.zero_grad()
                     lr_scheduler.step()
 
-                    # ema.step(nets.parameters())
+                    ema.step(nets.parameters())
 
                     loss_cpu = loss.item()
                     epoch_loss.append(loss_cpu)
                     tepoch.set_postfix(loss=loss_cpu)
+
             tglobal.set_postfix(loss=np.mean(epoch_loss))
             if (epoch_idx + 1) % 10 == 0:
-                time_now = time.strftime("%Y%m%d-%H%M%S") + "-" + str(epoch_idx)
-                save_directory = os.path.join(save_directory, time_now)
+                save_directory = os.path.join(save_directory, time.strftime("%Y%m%d-%H%M%S") + "-" + str(epoch_idx))
+                ema["noise_pred_net"].copy_to(noise_pred_net.parameters())
                 accelerator.wait_for_everyone()
                 accelerator.save_state(save_directory)
                 print(f"Saved model to {save_directory}, loss: {np.mean(epoch_loss)}")
