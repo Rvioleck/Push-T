@@ -61,6 +61,8 @@ def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, 
                     epoch_loss.append(loss_cpu)
                     tepoch.set_postfix(loss=loss_cpu)
             tglobal.set_postfix(loss=np.mean(epoch_loss))
+            avg_loss = np.mean(epoch_loss)
+            print(f'Epoch {epoch_idx + 1}/{num_epochs} - Loss: {avg_loss}')
             if (epoch_idx + 1) % 10 == 0:
                 time_now = time.strftime("%Y%m%d-%H%M%S") + "-" + str(epoch_idx)
                 save_directory = os.path.join(save_directory, time_now)
