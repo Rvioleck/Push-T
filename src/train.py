@@ -69,7 +69,6 @@ def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, 
                 print(f"Saved model to {save_directory}, loss: {np.mean(epoch_loss)}")
 
 
-
 def get_nets(obs_horizon=2):
     # Load your data and define your model here
     vision_encoder = get_resnet('resnet18')
@@ -93,6 +92,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size for the dataloader.")
     parser.add_argument("--diffusion_iters", type=int, default=100, help="Iteration of one diffusion step.")
     parser.add_argument("--save_dir", type=str, default="../ckpts/", help="Directory of saving model.")
+    parser.add_argument("--dataset_dir", type=str, default="../pusht_cchi_v7_replay.zarr.zip", help="Path of dataset.")
 
     args = parser.parse_args()
     pred_horizon = 16
@@ -101,7 +101,8 @@ if __name__ == "__main__":
 
     nets, ema = get_nets(obs_horizon=obs_horizon)
 
-    dataloader = get_dataloader(pred_horizon=pred_horizon, obs_horizon=obs_horizon, action_horizon=action_horizon,
+    dataloader = get_dataloader(dataset_path=args.dataset_dir, pred_horizon=pred_horizon, obs_horizon=obs_horizon,
+                                action_horizon=action_horizon,
                                 batch_size=args.batch_size)
 
     optimizer = torch.optim.AdamW(params=nets.parameters(), lr=args.lr, weight_decay=1e-6)
