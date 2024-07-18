@@ -1,4 +1,5 @@
 import collections
+import os
 
 import numpy as np
 import torch
@@ -22,13 +23,15 @@ noise_scheduler = DDPMScheduler(
     prediction_type='epsilon'
 )
 
-path_to_checkpoint = "../ckpts/20240718-114449-9"
+path_to_checkpoint = "/mnt/ssd/fyz/pushT/20240718-204210-39/"
 
 # 假设nets是一个ModuleDict，包含'vision_encoder'和'noise_pred_net'
 nets, _ = get_nets()
 accelerator = Accelerator()
 ema_nets = accelerator.prepare(nets)
+
 accelerator.load_state(path_to_checkpoint)
+
 
 # limit enviornment interaction to 200 steps before termination
 max_steps = 200

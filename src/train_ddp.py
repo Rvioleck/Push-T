@@ -19,14 +19,11 @@ def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, 
                               mixed_precision="fp16")
     device = accelerator.device
 
+    nets, optimizer, dataloader, lr_scheduler = accelerator.prepare(
+        nets, optimizer, dataloader, lr_scheduler
+    )
     vision_encoder = nets['vision_encoder']
     noise_pred_net = nets['noise_pred_net']
-
-    noise_pred_net, optimizer, dataloader, lr_scheduler = accelerator.prepare(
-        noise_pred_net, optimizer, dataloader, lr_scheduler
-    )
-
-    vision_encoder = accelerator.prepare_model(vision_encoder)
     ema.to(device)
 
     with tqdm(range(num_epochs), desc='Epoch', disable=not accelerator.is_local_main_process) as tglobal:
@@ -66,7 +63,7 @@ def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, 
                     tepoch.set_postfix(loss=loss_cpu)
 
             tglobal.set_postfix(loss=np.mean(epoch_loss))
-            if (epoch_idx + 1) % 10 == 0:
+            if (epoch_idx + 1) % 20 == 0:
                 exact_directory = os.path.join(save_directory, time.strftime("%Y%m%d-%H%M%S") + "-" + str(epoch_idx))
                 ema.copy_to(nets.parameters())
                 accelerator.wait_for_everyone()
@@ -121,7 +118,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for the optimizer.")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size for the dataloader.")
     parser.add_argument("--diffusion_iters", type=int, default=100, help="Iteration of one diffusion step.")
-    parser.add_argument("--save_dir", type=str, default="../ckpts/", help="Directory of saving model.")
+    parser.add_argument("--save_dir", type=str, default="/mnt/ssd/fyz/pushT/", help="Directory of saving model.")
     parser.add_argument("--dataset_dir", type=str, default="../pusht_cchi_v7_replay.zarr.zip", help="Path of dataset.")
     args = parser.parse_args()
 
