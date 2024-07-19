@@ -9,10 +9,12 @@ import torch.nn as nn
 import torchvision
 import collections
 import zarr
+from accelerate import Accelerator
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.training_utils import EMAModel
 from diffusers.optimization import get_scheduler
 from tqdm.auto import tqdm
+from train_ddp import get_nets
 
 # env import
 import gym
@@ -25,9 +27,9 @@ from pymunk.vec2d import Vec2d
 import shapely.geometry as sg
 import cv2
 import skimage.transform as st
-from skvideo.io import vwrite
-from IPython.display import Video
-import gdown
+# from skvideo.io import vwrite
+# from IPython.display import Video
+# import gdown
 import os
 
 # %%
@@ -880,7 +882,7 @@ class PushTImageDataset(torch.utils.data.Dataset):
 # @markdown ### **Dataset Demo**
 
 # download demonstration data from Google Drive
-dataset_path = r"E:\MyNotes\AI_learning\My Notes\DiffusionPolicy\PushT\pusht_cchi_v7_replay.zarr.zip"
+dataset_path = r"pusht_cchi_v7_replay.zarr.zip"
 # if not os.path.isfile(dataset_path):
 #     id = "1KY1InLurpMvJDRb14L9NlXT_fEsCvVUq&confirm=t"
 #     gdown.download(id=id, output=dataset_path, quiet=False)
@@ -1434,12 +1436,12 @@ ema.copy_to(ema_nets.parameters())
 # @markdown ### **Loading Pretrained Checkpoint**
 # @markdown Set `load_pretrained = True` to load pretrained weights.
 
-load_pretrained = True
+load_pretrained = False
 if load_pretrained:
     ckpt_path = "pusht_vision_100ep.ckpt"
-    if not os.path.isfile(ckpt_path):
-        id = "1XKpfNSlwYMGaF5CncoFaLKCDTWoLAHf1&confirm=t"
-        gdown.download(id=id, output=ckpt_path, quiet=False)
+    # if not os.path.isfile(ckpt_path):
+    #     id = "1XKpfNSlwYMGaF5CncoFaLKCDTWoLAHf1&confirm=t"
+    #     gdown.download(id=id, output=ckpt_path, quiet=False)
 
     state_dict = torch.load(ckpt_path, map_location='cuda')
     ema_nets = nets
@@ -1449,6 +1451,16 @@ else:
     print("Skipped pretrained weight loading.")
 # %%
 # @markdown ### **Inference**
+
+path_to_checkpoint = "/mnt/ssd/fyz/pushT/20240718-234633-499/"
+
+# 假设nets是一个ModuleDict，包含'vision_encoder'和'noise_pred_net'
+nets, _ = get_nets()
+accelerator = Accelerator()
+ema_nets = accelerator.prepare(nets)
+
+accelerator.load_state(path_to_checkpoint)
+
 
 # limit enviornment interaction to 200 steps before termination
 max_steps = 200
@@ -1557,5 +1569,5 @@ with tqdm(total=max_steps, desc="Eval PushTImageEnv") as pbar:
 print('Score: ', max(rewards))
 
 # visualize
-vwrite('vis.mp4', imgs)
-Video('vis.mp4', embed=True, width=256, height=256)
+# vwrite('vis.mp4', imgs)
+# Video('vis.mp4', embed=True, width=256, height=256)

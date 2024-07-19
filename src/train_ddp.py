@@ -63,7 +63,7 @@ def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, 
                     tepoch.set_postfix(loss=loss_cpu)
 
             tglobal.set_postfix(loss=np.mean(epoch_loss))
-            if (epoch_idx + 1) % 20 == 0:
+            if (epoch_idx + 1) % 100 == 0:
                 exact_directory = os.path.join(save_directory, time.strftime("%Y%m%d-%H%M%S") + "-" + str(epoch_idx))
                 ema.copy_to(nets.parameters())
                 accelerator.wait_for_everyone()
@@ -94,16 +94,17 @@ def prepare_data(args):
 
     nets, ema = get_nets(obs_horizon=obs_horizon)
 
-    dataloader = get_dataloader(dataset_path=args.dataset_dir, pred_horizon=pred_horizon, obs_horizon=obs_horizon,
-                                action_horizon=action_horizon,
-                                batch_size=args.batch_size, small_dataset=True)
+    dataloader = get_dataloader(dataset_path=args.dataset_dir, pred_horizon=pred_horizon,
+                                obs_horizon=obs_horizon, action_horizon=action_horizon,
+                                batch_size=args.batch_size, small_dataset=False)
 
     optimizer = torch.optim.AdamW(params=nets.parameters(), lr=args.lr, weight_decay=1e-6)
 
     lr_scheduler = get_scheduler(name='cosine', optimizer=optimizer, num_warmup_steps=500,
                                  num_training_steps=len(dataloader) * args.num_epochs)
 
-    noise_scheduler = DDPMScheduler(num_train_timesteps=args.diffusion_iters, beta_schedule='squaredcos_cap_v2',
+    noise_scheduler = DDPMScheduler(num_train_timesteps=args.diffusion_iters,
+                                    beta_schedule='squaredcos_cap_v2',
                                     clip_sample=True,
                                     prediction_type='epsilon')
     save_dir = args.save_dir
@@ -114,7 +115,7 @@ def prepare_data(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Training script for the model.")
-    parser.add_argument("--num_epochs", type=int, default=200, help="Number of epochs to train the model.")
+    parser.add_argument("--num_epochs", type=int, default=500, help="Number of epochs to train the model.")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for the optimizer.")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size for the dataloader.")
     parser.add_argument("--diffusion_iters", type=int, default=100, help="Iteration of one diffusion step.")
