@@ -7,7 +7,9 @@ import cv2
 import numpy as np
 import torch
 from accelerate import Accelerator
-from diffusers import DDPMScheduler
+from diffusers import DPMSolverMultistepScheduler
+
+from scheduler import get_scheduler
 from tqdm.auto import tqdm
 
 from pushTEnvOriginal import PushTImageEnv
@@ -15,16 +17,8 @@ from pushTImageDataset import get_stats, normalize_data, unnormalize_data
 from train_ddp import get_nets
 
 
-def main(num_diffusion_iters, scheduler_type, model_path, max_inference_steps, seed, output_video_dir):
-    noise_scheduler = DDPMScheduler(
-        num_train_timesteps=num_diffusion_iters,
-        beta_schedule=scheduler_type,
-        clip_sample=True,
-        prediction_type='epsilon'
-    )
-    # init scheduler
-    noise_scheduler.set_timesteps(num_diffusion_iters)
-
+def main(num_diffusion_iters, num_inference_steps, scheduler_type, beta_type,
+         model_path, max_inference_steps, seed, output_video_dir):
     # model and parameters
     path_to_checkpoint = model_path
     nets, _ = get_nets()
@@ -43,20 +37,21 @@ def main(num_diffusion_iters, scheduler_type, model_path, max_inference_steps, s
     stats = get_stats()
     # the max step of inference.
     max_steps = max_inference_steps
-    modelEvaluate(ema_nets, noise_scheduler,
+    modelEvaluate(ema_nets, num_diffusion_iters, num_inference_steps, scheduler_type, beta_type,
                   pred_horizon, obs_horizon, action_horizon, action_dim, stats,
                   max_steps, output_video_dir, seed, device)
 
 
-def modelEvaluate(ema_nets, noise_scheduler,
+def modelEvaluate(ema_nets, num_diffusion_iters, num_inference_steps, scheduler_type, beta_type,
                   pred_horizon, obs_horizon, action_horizon, action_dim, stats,
                   max_steps, output_video_dir, seed, device):
     score_list = list()
     step_list = list()
-    timecost_list = list()  # 新增时间成本列表
-    for seed_i in range(seed, seed + 20):
+    timecost_list = list()
+    for seed_i in range(seed, seed + 50):
         video_name = os.path.join(output_video_dir, f"video{seed_i}.avi")
-        score, step, timecost = actionGenerating(ema_nets, noise_scheduler,
+        score, step, timecost = actionGenerating(ema_nets, num_diffusion_iters, num_inference_steps, scheduler_type,
+                                                 beta_type,
                                                  pred_horizon, obs_horizon, action_horizon, action_dim, stats,
                                                  max_steps, video_name, seed_i, device)
         score_list.append(score)
@@ -69,25 +64,37 @@ def modelEvaluate(ema_nets, noise_scheduler,
     stats_file_path = os.path.join(output_video_dir, "stats.txt")
 
     with open(stats_file_path, 'w') as stats_file:
+        stats_file.write("Model Evaluation Statistics\n\n")
+
         stats_file.write("Individual Scores:\n")
+        stats_file.write("Seed\tScore\n")
         for idx, score in enumerate(score_list):
-            stats_file.write(f"Run seed{idx + seed}: {score}\n")
-        stats_file.write(f"\nAverage Score: {avg_score}\n")
+            stats_file.write(f"{seed + idx}\t{score}\n")
+        stats_file.write("\n")
 
-        stats_file.write("\nIndividual Steps:\n")
+        stats_file.write("Average Score:\t{avg_score}\n\n".format(avg_score=avg_score))
+
+        stats_file.write("Individual Steps:\n")
+        stats_file.write("Seed\tSteps\n")
         for idx, step in enumerate(step_list):
-            stats_file.write(f"Run seed{idx + seed}: {step} steps\n")
-        stats_file.write(f"\nAverage Steps: {avg_step}\n")
+            stats_file.write(f"{seed + idx}\t{step}\n")
+        stats_file.write("\n")
 
-        stats_file.write("\nIndividual Time Costs:\n")
+        stats_file.write("Average Steps:\t{avg_step}\n\n".format(avg_step=avg_step))
+
+        stats_file.write("Individual Time Costs (in seconds):\n")
+        stats_file.write("Seed\tTime Cost\n")
         for idx, timecost in enumerate(timecost_list):
-            stats_file.write(f"Run seed{idx + seed}: {timecost:.6f} seconds\n")
-        stats_file.write(f"\nAverage Time Cost: {avg_timecost:.6f} seconds\n")
+            stats_file.write(f"{seed + idx}\t{timecost:.6f}\n")
+        stats_file.write("\n")
+
+        stats_file.write("Average Time Cost (in seconds):\t{avg_timecost:.6f}\n".format(avg_timecost=avg_timecost))
 
     print(f"Stats have been written to {stats_file_path}")
 
 
-def actionGenerating(ema_nets, noise_scheduler, pred_horizon, obs_horizon, action_horizon, action_dim, stats, max_steps,
+def actionGenerating(ema_nets, num_diffusion_iters, num_inference_steps, scheduler_type, beta_type,
+                     pred_horizon, obs_horizon, action_horizon, action_dim, stats, max_steps,
                      output_video_path, seed, device):
     env = PushTImageEnv()
     env.seed(seed)
@@ -121,7 +128,7 @@ def actionGenerating(ema_nets, noise_scheduler, pred_horizon, obs_horizon, actio
             # (2,3,96,96)
             nagent_poses = torch.from_numpy(nagent_poses).to(device, dtype=torch.float32)
             # (2,2)
-
+            noise_scheduler = get_scheduler(num_diffusion_iters, num_inference_steps, scheduler_type, beta_type)
             # infer action
             with torch.no_grad():
                 # get image features
@@ -139,7 +146,12 @@ def actionGenerating(ema_nets, noise_scheduler, pred_horizon, obs_horizon, actio
                     (B, pred_horizon, action_dim), device=device)
                 naction = noisy_action
 
-                for k in noise_scheduler.timesteps:
+                if isinstance(noise_scheduler, DPMSolverMultistepScheduler):
+                    timesteps = noise_scheduler.timesteps[1:]
+                else:
+                    timesteps = noise_scheduler.timesteps
+
+                for k in timesteps:
                     # predict noise
                     noise_pred = ema_nets['noise_pred_net'](
                         sample=naction,
@@ -219,18 +231,22 @@ def generate_video(images, output_video_path, frame_rate=30):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluation script for PushTImageEnv.")
-    parser.add_argument('--num_diffusion_iters', type=int, default=100,
-                        help='Number of diffusion iterations.')
-    parser.add_argument('--scheduler_type', type=str, default='squaredcos_cap_v2',
-                        choices=['linear', 'cosine', 'cosine_with_restarts', 'squaredcos_cap_v2'],
+    parser.add_argument('--num_training_steps', type=int, default=100,
+                        help='Number of diffusion iterations, same with training.')
+    parser.add_argument('--num_inference_steps', type=int, default=100,
+                        help='Number of steps of a diffusion iter.')
+    parser.add_argument('--scheduler_type', type=str, default="ddpm",
                         help='Type of the noise scheduler.')
+    parser.add_argument('--beta_type', type=str, default='squaredcos_cap_v2',
+                        choices=['linear', 'scaled_linear', 'squaredcos_cap_v2'],
+                        help='Type of the beta scheduler.')
     parser.add_argument('--model_path', type=str, default="/mnt/ssd/fyz/pushT/20240718-234633-499/",
                         help='Path to the model checkpoint.')
     parser.add_argument('--max_inference_steps', type=int, default=500,
-                        help='Maximum number of inference steps.')
+                        help='Maximum number of predicted action steps.')
     parser.add_argument('--seed', type=int, default=200000,
                         help='Random seed for environment initialization.')
-    parser.add_argument('--output_video_dir', type=str, default="../output_video/base_model/",
+    parser.add_argument('--output_video_dir', type=str, default="/mnt/ssd/fyz/pushT/output_video/base_model_ddim/",
                         help='Output path for generating video.')
     return parser.parse_args()
 
@@ -238,5 +254,5 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     os.makedirs(args.output_video_dir, exist_ok=True)
-    main(args.num_diffusion_iters, args.scheduler_type, args.model_path, args.max_inference_steps, args.seed,
-         args.output_video_dir)
+    main(args.num_training_steps, args.num_inference_steps, args.scheduler_type, args.beta_type,
+         args.model_path, args.max_inference_steps, args.seed, args.output_video_dir)
