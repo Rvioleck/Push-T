@@ -9,7 +9,8 @@ from torch import nn
 from tqdm.auto import tqdm
 
 from pushTImageDataset import get_dataloader
-from conditionalUnet import ConditionalUnet1D, get_resnet, replace_bn_with_gn
+# from conditionalUnet import ConditionalUnet1D, get_resnet, replace_bn_with_gn
+from attentionUnet import ConditionalUnet1D, get_resnet, replace_bn_with_gn
 from accelerate import Accelerator
 
 
@@ -19,11 +20,12 @@ def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, 
                               mixed_precision="fp16")
     device = accelerator.device
 
-    nets, optimizer, dataloader, lr_scheduler = accelerator.prepare(
-        nets, optimizer, dataloader, lr_scheduler
-    )
-    vision_encoder = nets['vision_encoder']
-    noise_pred_net = nets['noise_pred_net']
+    vision_encoder = accelerator.prepare_model(nets['vision_encoder'])
+    noise_pred_net = accelerator.prepare_model(nets['noise_pred_net'])
+    optimizer = accelerator.prepare_optimizer(optimizer)
+    dataloader = accelerator.prepare(dataloader)
+    lr_scheduler = accelerator.prepare(lr_scheduler)
+
     ema.to(device)
 
     with tqdm(range(num_epochs), desc='Epoch', disable=not accelerator.is_local_main_process) as tglobal:
@@ -68,7 +70,7 @@ def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, 
                 ema.copy_to(nets.parameters())
                 accelerator.wait_for_everyone()
                 accelerator.save_state(exact_directory)
-                print(f"Saved model to {exact_directory}, loss: {np.mean(epoch_loss)}")
+                accelerator.print(f"Saved model to {exact_directory}, loss: {np.mean(epoch_loss)}")
 
 
 def get_nets(obs_horizon=2):
@@ -105,7 +107,6 @@ def prepare_data(args):
 
     noise_scheduler = DDPMScheduler(num_train_timesteps=args.diffusion_iters,
                                     beta_schedule='squaredcos_cap_v2',
-                                    clip_sample=True,
                                     prediction_type='epsilon')
     save_dir = args.save_dir
     if not os.path.exists(save_dir):
@@ -118,7 +119,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=500, help="Number of epochs to train the model.")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for the optimizer.")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size for the dataloader.")
-    parser.add_argument("--diffusion_iters", type=int, default=100, help="Iteration of one diffusion step.")
+    parser.add_argument("--diffusion_iters", type=int, default=1000, help="Iteration of one diffusion step.")
     parser.add_argument("--save_dir", type=str, default="/mnt/ssd/fyz/pushT/", help="Directory of saving model.")
     parser.add_argument("--dataset_dir", type=str, default="../pusht_cchi_v7_replay.zarr.zip", help="Path of dataset.")
     args = parser.parse_args()

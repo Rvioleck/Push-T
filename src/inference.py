@@ -23,7 +23,8 @@ def main(num_diffusion_iters, num_inference_steps, scheduler_type, beta_type,
     path_to_checkpoint = model_path
     nets, _ = get_nets()
     accelerator = Accelerator()
-    ema_nets = accelerator.prepare(nets)
+    nets['vision_encoder'] = accelerator.prepare(nets['vision_encoder'])
+    nets['noise_pred_net'] = accelerator.prepare(nets['noise_pred_net'])
     accelerator.load_state(path_to_checkpoint)
     device = accelerator.device
 
@@ -37,7 +38,7 @@ def main(num_diffusion_iters, num_inference_steps, scheduler_type, beta_type,
     stats = get_stats()
     # the max step of inference.
     max_steps = max_inference_steps
-    modelEvaluate(ema_nets, num_diffusion_iters, num_inference_steps, scheduler_type, beta_type,
+    modelEvaluate(nets, num_diffusion_iters, num_inference_steps, scheduler_type, beta_type,
                   pred_horizon, obs_horizon, action_horizon, action_dim, stats,
                   max_steps, output_video_dir, seed, device)
 
@@ -231,22 +232,22 @@ def generate_video(images, output_video_path, frame_rate=30):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluation script for PushTImageEnv.")
-    parser.add_argument('--num_training_steps', type=int, default=100,
+    parser.add_argument('--num_training_steps', type=int, default=1000,
                         help='Number of diffusion iterations, same with training.')
-    parser.add_argument('--num_inference_steps', type=int, default=100,
+    parser.add_argument('--num_inference_steps', type=int, default=25,
                         help='Number of steps of a diffusion iter.')
     parser.add_argument('--scheduler_type', type=str, default="ddpm",
                         help='Type of the noise scheduler.')
     parser.add_argument('--beta_type', type=str, default='squaredcos_cap_v2',
                         choices=['linear', 'scaled_linear', 'squaredcos_cap_v2'],
                         help='Type of the beta scheduler.')
-    parser.add_argument('--model_path', type=str, default="/mnt/ssd/fyz/pushT/20240718-234633-499/",
+    parser.add_argument('--model_path', type=str, default="/mnt/ssd/fyz/pushT/20240720-152755-299/",
                         help='Path to the model checkpoint.')
     parser.add_argument('--max_inference_steps', type=int, default=500,
                         help='Maximum number of predicted action steps.')
     parser.add_argument('--seed', type=int, default=200000,
                         help='Random seed for environment initialization.')
-    parser.add_argument('--output_video_dir', type=str, default="/mnt/ssd/fyz/pushT/output_video/base_model_ddim/",
+    parser.add_argument('--output_video_dir', type=str, default="/mnt/ssd/fyz/pushT/output_video/ecattention_1000_ddpm25/",
                         help='Output path for generating video.')
     return parser.parse_args()
 

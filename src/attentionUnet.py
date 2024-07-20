@@ -39,6 +39,31 @@ class Upsample1d(nn.Module):
         return self.conv(x)
 
 
+class ECAttention(nn.Module):
+    def __init__(self):
+        super(ECAttention, self).__init__()
+
+        self.avg_pool = nn.AdaptiveAvgPool1d(1)
+        self.conv = nn.Conv1d(1, 1, kernel_size=3, padding=1, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        # batch, channel, dim -> batch, channel, 1
+        y = self.avg_pool(x)
+
+        # batch, channel, 1 -> batch, 1, channel
+        y = y.transpose(-1, -2)
+        y = self.conv(y)
+        y = y.transpose(-1, -2)
+        y = self.sigmoid(y)
+        return x * y.expand_as(x)
+
+# x = torch.randn((1, 16, 2))
+# eca = ECAttention()
+# y = eca(x)
+# print(y.shape)
+# print(sum(p.numel() for p in eca.parameters() if p.requires_grad))
+
 class Conv1dBlock(nn.Module):
     '''
         Conv1d --> GroupNorm --> Mish
@@ -84,6 +109,7 @@ class ConditionalResidualBlock1D(nn.Module):
         # make sure dimensions compatible
         self.residual_conv = nn.Conv1d(in_channels, out_channels, 1) \
             if in_channels != out_channels else nn.Identity()
+        self.eca = ECAttention()
 
     def forward(self, x, cond):
         '''
@@ -95,7 +121,7 @@ class ConditionalResidualBlock1D(nn.Module):
         '''
         out = self.blocks[0](x)
         embed = self.cond_encoder(cond)
-
+        embed = self.eca(embed)
         embed = embed.reshape(
             embed.shape[0], 2, self.out_channels, 1)
         scale = embed[:, 0, ...]
@@ -316,6 +342,3 @@ def replace_bn_with_gn(
             num_channels=x.num_features)
     )
     return root_module
-
-# model = ConditionalUnet1D(2, 1028)
-# print(sum(p.numel() for p in model.parameters() if p.requires_grad))
