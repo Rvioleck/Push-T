@@ -9,23 +9,22 @@ from torch import nn
 from tqdm.auto import tqdm
 
 from pushTImageDataset import get_dataloader
-# from conditionalUnet import ConditionalUnet1D, get_resnet, replace_bn_with_gn
-from attentionUnet import ConditionalUnet1D, get_resnet, replace_bn_with_gn
+from conditionalUnet import ConditionalUnet1D, get_resnet, replace_bn_with_gn
 from accelerate import Accelerator
 
 
 def train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, num_epochs,
-               save_directory):
+               save_directory, from_ckpt, ckpt_diretory):
     accelerator = Accelerator(gradient_accumulation_steps=2,
                               mixed_precision="fp16")
     device = accelerator.device
-
     vision_encoder = accelerator.prepare_model(nets['vision_encoder'])
     noise_pred_net = accelerator.prepare_model(nets['noise_pred_net'])
     optimizer = accelerator.prepare_optimizer(optimizer)
     dataloader = accelerator.prepare(dataloader)
     lr_scheduler = accelerator.prepare(lr_scheduler)
-
+    if from_ckpt:
+        accelerator.load_state(ckpt_diretory)
     ema.to(device)
 
     with tqdm(range(num_epochs), desc='Epoch', disable=not accelerator.is_local_main_process) as tglobal:
@@ -122,8 +121,11 @@ if __name__ == "__main__":
     parser.add_argument("--diffusion_iters", type=int, default=1000, help="Iteration of one diffusion step.")
     parser.add_argument("--save_dir", type=str, default="/mnt/ssd/fyz/pushT/", help="Directory of saving model.")
     parser.add_argument("--dataset_dir", type=str, default="../pusht_cchi_v7_replay.zarr.zip", help="Path of dataset.")
+    parser.add_argument("--from_ckpt", type=bool, default=False, help="Whether to train from checkpoint.")
+    parser.add_argument("--ckpt_diretory", type=str, default="/mnt/ssd/fyz/pushT/ecattention-epoch500/",
+                        help="The ckptdir, if to train from checkpoint.")
     args = parser.parse_args()
 
     nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler = prepare_data(args)
     train_loop(nets, dataloader, optimizer, lr_scheduler, ema, noise_scheduler, args.num_epochs,
-               args.save_dir)
+               args.save_dir, args.from_ckpt, args.ckpt_diretory)

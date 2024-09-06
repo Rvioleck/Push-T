@@ -85,6 +85,8 @@ class ConditionalResidualBlock1D(nn.Module):
         self.residual_conv = nn.Conv1d(in_channels, out_channels, 1) \
             if in_channels != out_channels else nn.Identity()
 
+        self.eca = ECAttention2()
+
     def forward(self, x, cond):
         '''
             x : [ batch_size x in_channels x horizon ]
@@ -95,7 +97,7 @@ class ConditionalResidualBlock1D(nn.Module):
         '''
         out = self.blocks[0](x)
         embed = self.cond_encoder(cond)
-
+        embed = self.eca(embed) + embed
         embed = embed.reshape(
             embed.shape[0], 2, self.out_channels, 1)
         scale = embed[:, 0, ...]
@@ -198,13 +200,13 @@ class ConditionalUnet1D(nn.Module):
                 timestep: Union[torch.Tensor, float, int],
                 global_cond=None):
         """
-        x: (B,T,input_dim)
-        timestep: (B,) or int, diffusion step
-        global_cond: (B,global_cond_dim)
-        output: (B,T,input_dim)
+        x: (B,T,input_dim)  (1,16,2)
+        timestep: (B,) or int, diffusion step  (1,)
+        global_cond: (B,global_cond_dim)  (1,1028)
+        output: (B,T,input_dim)  (1,16,2)
         """
         # (B,T,C)
-        sample = sample.moveaxis(-1, -2)
+        sample = sample.moveaxis(-1, -2)  # (1,16,2) ->(1,2,16)
         # (B,C,T)
 
         # 1. time
@@ -217,20 +219,20 @@ class ConditionalUnet1D(nn.Module):
         # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
         timesteps = timesteps.expand(sample.shape[0])
 
-        global_feature = self.diffusion_step_encoder(timesteps)
+        global_feature = self.diffusion_step_encoder(timesteps)  # (1,) -> (1,256)
 
         if global_cond is not None:
-            global_feature = torch.cat([
+            global_feature = torch.cat([  # (1,256), (1,1028) -> (1, 1284)
                 global_feature, global_cond
-            ], axis=-1)
+            ], dim=-1)
 
         x = sample
         h = []
         for idx, (resnet, resnet2, downsample) in enumerate(self.down_modules):
-            x = resnet(x, global_feature)
-            x = resnet2(x, global_feature)
+            x = resnet(x, global_feature)  # (1,2,16) -> (1,256,16), (1,256,8) -> (1,512,8)
+            x = resnet2(x, global_feature)  # (1,256,16) -> (1,256,16), (1,512,8) -> (1,512,8)
             h.append(x)
-            x = downsample(x)
+            x = downsample(x)  # (1,256,16) -> (1,256,8), (1,512,8) -> (1,512,4)
 
         for mid_module in self.mid_modules:
             x = mid_module(x, global_feature)
@@ -316,6 +318,49 @@ def replace_bn_with_gn(
             num_channels=x.num_features)
     )
     return root_module
+
+
+class ECAttention(nn.Module):  # 79947302
+    def __init__(self):
+        super(ECAttention, self).__init__()
+
+        self.avg_pool = nn.AdaptiveAvgPool1d(1)
+        self.conv1 = nn.Conv1d(1, 1, kernel_size=3, padding=1, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        # batch, channel, dim -> batch, channel, 1
+        y = self.avg_pool(x)
+
+        # batch, channel, 1 -> batch, 1, channel
+        y = y.transpose(-1, -2)
+        y = self.conv1(y)
+        y = self.conv2(y)
+        y = y.transpose(-1, -2)
+        y = self.sigmoid(y)
+        return x * y.expand_as(x)
+
+
+class ECAttention2(nn.Module):  # 79951874
+    def __init__(self, hidden_dim=64):
+        super(ECAttention2, self).__init__()
+
+        self.avg_pool = nn.AdaptiveAvgPool1d(1)
+        self.conv1 = nn.Conv1d(1, hidden_dim, kernel_size=3, padding=1, bias=False)
+        self.conv2 = nn.Conv1d(hidden_dim, 1, kernel_size=3, padding=1, bias=False)
+        self.silu = nn.SiLU()
+
+    def forward(self, x):
+        # batch, channel, dim -> batch, channel, 1
+        y = self.avg_pool(x)
+
+        # batch, channel, 1 -> batch, 1, channel
+        y = y.transpose(-1, -2)
+        y = self.conv1(y)
+        y = self.conv2(y)
+        y = y.transpose(-1, -2)
+        y = self.silu(y)
+        return x * y.expand_as(x)
 
 # model = ConditionalUnet1D(2, 1028)
 # print(sum(p.numel() for p in model.parameters() if p.requires_grad))

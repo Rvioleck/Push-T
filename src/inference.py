@@ -241,7 +241,7 @@ def parse_args():
     parser.add_argument('--beta_type', type=str, default='squaredcos_cap_v2',
                         choices=['linear', 'scaled_linear', 'squaredcos_cap_v2'],
                         help='Type of the beta scheduler.')
-    parser.add_argument('--model_path', type=str, default="/mnt/ssd/fyz/pushT/20240720-152755-299/",
+    parser.add_argument('--model_path', type=str, default="/mnt/ssd/fyz/pushT/ecattention-epoch500/",
                         help='Path to the model checkpoint.')
     parser.add_argument('--max_inference_steps', type=int, default=500,
                         help='Maximum number of predicted action steps.')
